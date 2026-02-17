@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Inteligente PRO</title>
+<title>Reporte Ejecutivo de Asesor</title>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -14,76 +14,60 @@ body{
   margin:0;
   padding:20px;
 }
-h2{text-align:center;color:#2c3e50;}
-select,button,input{
-  padding:8px;
+
+h2{
+  text-align:center;
+  color:#2c3e50;
+}
+
+select,button{
+  padding:10px;
   margin:6px;
   border-radius:6px;
-  border:1px solid #ccc;
+  border:none;
+  font-size:14px;
 }
+
 button{
   background:#2c3e50;
   color:white;
   cursor:pointer;
 }
 
-.kpi-box{
-  flex:1;
-  padding:12px;
-  border-radius:8px;
-  text-align:center;
-  font-weight:bold;
-}
-
-.kpi-verde{background:#d4edda;color:#155724;}
-.kpi-amarillo{background:#fff3cd;color:#856404;}
-.kpi-rojo{background:#f8d7da;color:#721c24;}
-
-#panelAnalisis{
+#panel{
   display:none;
   margin-top:30px;
   background:white;
-  padding:20px;
-  border-radius:10px;
-  box-shadow:0 4px 12px rgba(0,0,0,0.1);
+  padding:25px;
+  border-radius:12px;
+  box-shadow:0 6px 18px rgba(0,0,0,0.08);
 }
 
-.tabla-ranking{
+#textoResultado{
   margin-top:20px;
-  border-collapse:collapse;
-  width:100%;
+  font-size:14px;
+  line-height:1.6;
 }
-.tabla-ranking th{
-  background:#2c3e50;
-  color:white;
-  padding:8px;
-}
-.tabla-ranking td{
-  padding:6px;
-  text-align:center;
-  border-bottom:1px solid #eee;
+
+canvas{
+  margin-top:30px;
 }
 </style>
 </head>
 <body>
 
-<h2>📊 Dashboard Inteligente PRO</h2>
+<h2>📊 Reporte Ejecutivo por Asesor</h2>
 
 <div style="text-align:center;">
 <select id="asesorSelect"></select>
-<button onclick="generarAnalisis()">Generar Análisis</button>
+<button onclick="generar()">Generar Evidencia</button>
 <button onclick="exportarPDF()">Exportar PDF</button>
-<button onclick="enviarCorreo()">Enviar por Correo</button>
 </div>
 
-<div id="panelAnalisis">
-<div id="rankingContainer"></div>
-<div id="kpisComparativos" style="display:flex;gap:10px;flex-wrap:wrap;"></div>
-<canvas id="graficoAnalisis" height="100"></canvas>
-<h3>Conclusión Ejecutiva</h3>
-<div id="textoAnalisis"></div>
-<h3>Detalle de Indicadores</h3>
-<div id="detalleIndicadores"></div>
+<div id="panel">
+<h3 id="tituloAsesor"></h3>
+<div id="textoResultado"></div>
+<canvas id="grafico" height="100"></canvas>
 </div>
 
 <script>
@@ -117,13 +101,13 @@ const datos=filas.slice(1);
 
 const IDX={
   RAC:encabezados.indexOf("RAC"),
-  SEMANA:encabezados.indexOf("SEMANA"),
-  MES:encabezados.indexOf("MES")
+  SEMANA:encabezados.indexOf("SEMANA")
 };
 
 const indicadores=encabezados.filter(h=>h.includes("%"));
 
 const asesores=[...new Set(datos.map(f=>f[IDX.RAC]))];
+
 const select=document.getElementById("asesorSelect");
 asesores.forEach(a=>{
   const o=document.createElement("option");
@@ -133,107 +117,75 @@ asesores.forEach(a=>{
 
 let chart;
 
-function evaluar(a,b,menor=false){
-  if(isNaN(a)||isNaN(b)) return {estado:"Sin datos",clase:"kpi-amarillo",dif:0};
-  let diff=a-b;
-  if(menor) diff=b-a;
-  if(diff>0) return {estado:"Mejora",clase:"kpi-verde",dif:Math.abs(diff).toFixed(2)};
-  if(diff<0) return {estado:"Desmejora",clase:"kpi-rojo",dif:Math.abs(diff).toFixed(2)};
-  return {estado:"Sin cambio",clase:"kpi-amarillo",dif:0};
-}
-
-function calcularScore(fila){
-  let total=0,count=0;
-  indicadores.forEach(ind=>{
-    const val=parseFloat(fila[encabezados.indexOf(ind)]);
-    if(!isNaN(val)){ total+=val; count++; }
-  });
-  return count? (total/count).toFixed(2):0;
-}
-
-function generarRanking(){
-  const ranking=asesores.map(a=>{
-    const filasA=datos.filter(f=>f[IDX.RAC]===a && f[IDX.SEMANA]?.includes("Total Semana"));
-    const ultima=filasA[filasA.length-1];
-    return {
-      asesor:a,
-      score:ultima?parseFloat(calcularScore(ultima)):0
-    };
-  }).sort((a,b)=>b.score-a.score);
-
-  let html=`<h3>🏆 Ranking Global</h3><table class="tabla-ranking"><tr><th>#</th><th>Asesor</th><th>Score</th></tr>`;
-  ranking.forEach((r,i)=>{
-    html+=`<tr><td>${i+1}</td><td>${r.asesor}</td><td>${r.score}</td></tr>`;
-  });
-  html+="</table>";
-  document.getElementById("rankingContainer").innerHTML=html;
-}
-
-window.generarAnalisis=function(){
+window.generar=function(){
 
 const asesor=select.value;
+
 const filasA=datos.filter(f=>f[IDX.RAC]===asesor && f[IDX.SEMANA]?.includes("Total Semana"));
 
-if(filasA.length<2){alert("No hay suficientes semanas");return;}
+if(filasA.length<2){
+  alert("No hay suficientes semanas");
+  return;
+}
 
 const actual=filasA[filasA.length-1];
 const anterior=filasA[filasA.length-2];
 
-document.getElementById("panelAnalisis").style.display="block";
+let texto=`El asesor <b>${asesor}</b> presentó:<br><br>`;
 
-generarRanking();
-
-let htmlKPI="";
-let texto="<ul>";
 let datasets=[];
 
 indicadores.forEach(ind=>{
   const col=encabezados.indexOf(ind);
-  const menor=ind.toLowerCase().includes("rein");
-  const ev=evaluar(parseFloat(actual[col]),parseFloat(anterior[col]),menor);
-  htmlKPI+=`<div class="kpi-box ${ev.clase}">${ind}<br>${ev.estado} (${ev.dif}%)</div>`;
-  texto+=`<li>${ind}: ${ev.estado} de ${ev.dif}%</li>`;
+  const valAct=parseFloat(actual[col]);
+  const valAnt=parseFloat(anterior[col]);
+
+  if(isNaN(valAct)||isNaN(valAnt)) return;
+
+  let diff=valAct-valAnt;
+  let estado="Sin cambio";
+
+  if(diff>0) estado="Mejora";
+  if(diff<0) estado="Desmejora";
+
+  texto+=`${ind}: ${estado} de ${Math.abs(diff).toFixed(2)}%<br>`;
+
   datasets.push({
     label:ind,
     data:filasA.map(f=>parseFloat(f[col])),
     borderWidth:2,
-    tension:0.3
+    tension:0.3,
+    fill:false
   });
 });
 
-texto+="</ul>";
-
-document.getElementById("kpisComparativos").innerHTML=htmlKPI;
-document.getElementById("textoAnalisis").innerHTML=`El asesor <b>${asesor}</b> presentó:${texto}`;
-
-document.getElementById("detalleIndicadores").innerHTML=`
-Score Global: <b>${calcularScore(actual)}</b>
-<br>Comparación Mensual automática incluida en score
-`;
+document.getElementById("tituloAsesor").innerHTML="Evidencia Comparativa Semanal";
+document.getElementById("textoResultado").innerHTML=texto;
+document.getElementById("panel").style.display="block";
 
 if(chart) chart.destroy();
-chart=new Chart(document.getElementById("graficoAnalisis"),{
+
+chart=new Chart(document.getElementById("grafico"),{
   type:"line",
   data:{
     labels:filasA.map(f=>f[IDX.SEMANA]),
     datasets:datasets
+  },
+  options:{
+    responsive:true,
+    plugins:{
+      legend:{position:"bottom"}
+    }
   }
 });
 
 }
 
 window.exportarPDF=function(){
-  html2pdf().from(document.getElementById("panelAnalisis")).save("Reporte_Asesor_PRO.pdf");
-}
-
-window.enviarCorreo=function(){
-  const asesor=select.value;
-  const body=document.getElementById("textoAnalisis").innerText;
-  window.location.href=`mailto:?subject=Reporte ${asesor}&body=${encodeURIComponent(body)}`;
+  html2pdf().from(document.getElementById("panel")).save("Evidencia_Asesor.pdf");
 }
 
 });
 </script>
 </body>
 </html>
-
