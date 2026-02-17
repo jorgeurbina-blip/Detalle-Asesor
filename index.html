@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Dashboard Asesores</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+body{
+    font-family: Arial;
+    background:#f4f6f9;
+    margin:20px;
+}
+h1{
+    text-align:center;
+}
+select,button{
+    padding:8px;
+    margin:5px;
+}
+.kpi{
+    display:inline-block;
+    width:22%;
+    background:white;
+    padding:15px;
+    margin:1%;
+    border-radius:8px;
+    box-shadow:0 2px 5px rgba(0,0,0,0.1);
+}
+.green{color:green;font-weight:bold;}
+.red{color:red;font-weight:bold;}
+.gray{color:gray;}
+#reporte{
+    background:white;
+    padding:20px;
+    margin-top:20px;
+}
+</style>
+</head>
+<body>
+
+<h1>Dashboard Profesional Asesores</h1>
+
+<select id="asesorSelect"></select>
+<button onclick="generarReporte()">Generar Reporte</button>
+<button onclick="exportarPDF()">Exportar PDF</button>
+
+<div id="reporte">
+
+<div id="kpis"></div>
+
+<canvas id="grafico" height="100"></canvas>
+
+<h3>Análisis Automático</h3>
+<div id="textoAnalisis"></div>
+
+</div>
+
+<script>
+
+const urlCSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTv__z4dmUZOol3wAk_xfvxVHrJHFuaP3dKX8M9S-j6dd3WjUz0iCpxGnIOzpq2s1oOKPWGf5q45Yox/pub?output=csv";
+
+let datos = [];
+let chart;
+
+// Leer CSV
+fetch(urlCSV)
+.then(res => res.text())
+.then(text => {
+    const filas = text.split("\n").map(r => r.split(","));
+    const headers = filas[0];
+    
+    for(let i=1;i<filas.length;i++){
+        if(filas[i].length > 5){
+            let obj = {};
+            headers.forEach((h,index)=>{
+                obj[h.trim()] = filas[i][index];
+            });
+            datos.push(obj);
+        }
+    }
+    cargarAsesores();
+});
+
+function cargarAsesores(){
+    const asesores = [...new Set(datos.map(d => d.RAC))];
+    const select = document.getElementById("asesorSelect");
+    asesores.forEach(a=>{
+        let option = document.createElement("option");
+        option.value = a;
+        option.text = a;
+        select.appendChild(option);
+    });
+}
+
+function evaluar(actual, anterior, menorMejor=false){
+    let diff = actual - anterior;
+    if(menorMejor) diff = anterior - actual;
+
+    if(diff > 0) return {estado:"Mejora", clase:"green", variacion:diff.toFixed(2)};
+    if(diff < 0) return {estado:"Desmejora", clase:"red", variacion:diff.toFixed(2)};
+    return {estado:"Sin cambio", clase:"gray", variacion:0};
+}
+
+function generarReporte(){
+
+    const asesor = document.getElementById("asesorSelect").value;
+    const asesorData = datos.filter(d => d.RAC === asesor && d.SEMANA.includes("Total"));
+
+    if(asesorData.length < 2){
+        alert("No hay suficientes semanas para comparar");
+        return;
+    }
+
+    const actual = asesorData[asesorData.length-1];
+    const anterior = asesorData[asesorData.length-2];
+
+    const reincActual = parseFloat(actual["% Rein."]) || 0;
+    const reincAnt = parseFloat(anterior["% Rein."]) || 0;
+
+    const fcrActual = parseFloat(actual["% FCR 1dia"]) || 0;
+    const fcrAnt = parseFloat(anterior["% FCR 1dia"]) || 0;
+
+    const prodActual = parseFloat(actual["% VS Productividad"]) || 0;
+    const prodAnt = parseFloat(anterior["% VS Productividad"]) || 0;
+
+    const evalReinc = evaluar(reincActual, reincAnt, true);
+    const evalFCR = evaluar(fcrActual, fcrAnt);
+    const evalProd = evaluar(prodActual, prodAnt);
+
+    document.getElementById("kpis").innerHTML = `
+    <div class="kpi">
+        <h3>Reincidencia</h3>
+        ${reincActual}%<br>
+        <span class="${evalReinc.clase}">${evalReinc.estado} (${evalReinc.variacion}%)</span>
+    </div>
+    <div class="kpi">
+        <h3>FCR 1 Día</h3>
+        ${fcrActual}%<br>
+        <span class="${evalFCR.clase}">${evalFCR.estado} (${evalFCR.variacion}%)</span>
+    </div>
+    <div class="kpi">
+        <h3>Productividad</h3>
+        ${prodActual}%<br>
+        <span class="${evalProd.clase}">${evalProd.estado} (${evalProd.variacion}%)</span>
+    </div>
+    `;
+
+    generarGrafico(asesorData);
+
+    document.getElementById("textoAnalisis").innerHTML = `
+    En comparación con la semana anterior, la reincidencia presentó una 
+    <span class="${evalReinc.clase}">${evalReinc.estado}</span> de ${evalReinc.variacion}%. 
+    El FCR 1 día mostró una <span class="${evalFCR.clase}">${evalFCR.estado}</span> 
+    de ${evalFCR.variacion}%. 
+    La productividad evidenció una <span class="${evalProd.clase}">${evalProd.estado}</span> 
+    de ${evalProd.variacion}%.
+    `;
+}
+
+function generarGrafico(data){
+    const labels = data.map(d => d.SEMANA);
+    const valores = data.map(d => parseFloat(d["% Rein."]) || 0);
+
+    if(chart) chart.destroy();
+
+    chart = new Chart(document.getElementById("grafico"), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Reincidencia %',
+                data: valores,
+                borderWidth:2
+            }]
+        }
+    });
+}
+
+function exportarPDF(){
+    const elemento = document.getElementById("reporte");
+    html2pdf().from(elemento).save("Reporte_Asesor.pdf");
+}
+
+</script>
+
+</body>
+</html>
